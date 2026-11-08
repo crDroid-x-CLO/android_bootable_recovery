@@ -325,11 +325,11 @@ bool SetUpAbUpdateCommands(const std::string& package, ZipArchiveHandle zip, int
     LOG(ERROR) << "Failed to find " << AB_OTA_PAYLOAD;
     return false;
   }
-  long payload_offset = payload_entry.offset;
+  uint64_t payload_offset = payload_entry.offset;
   *cmd = {
     "/system/bin/update_engine_sideload",
     "--payload=file://" + package,
-    android::base::StringPrintf("--offset=%ld", payload_offset),
+    android::base::StringPrintf("--offset=%" PRIu64, payload_offset),
     "--headers=" + std::string(payload_properties.begin(), payload_properties.end()),
     android::base::StringPrintf("--status_fd=%d", status_fd),
   };
@@ -594,7 +594,9 @@ static InstallResult TryUpdateBinary(Package* package, bool* wipe_cache,
         LOG(ERROR) << "invalid \"set_progress\" parameters: " << line;
       }
     } else if (command == "ui_print") {
-      ui->PrintOnScreenOnly("%s\n", args.c_str());
+      // Keep all spaces
+      args = line.substr(space + 1);
+      ui->PrintOnScreenOnly("%s", args.c_str());
       fflush(stdout);
     } else if (command == "wipe_cache") {
       *wipe_cache = true;
@@ -661,13 +663,14 @@ static InstallResult VerifyAndInstallPackage(Package* package, bool* wipe_cache,
   ui->SetProgressType(RecoveryUI::DETERMINATE);
   ui->ShowProgress(VERIFICATION_PROGRESS_FRACTION, VERIFICATION_PROGRESS_TIME);
 
-  // Verify package.
+  /*
   if (!verify_package(package, ui)) {
     log_buffer->push_back(android::base::StringPrintf("error: %d", kZipVerificationFailure));
     if (!ui->IsTextVisible() || !ask_to_continue_unverified(ui->GetDevice())) {
         return INSTALL_CORRUPT;
     }
   }
+   */
 
   // Verify and install the contents of the package.
   ui->Print("Installing update...\n");

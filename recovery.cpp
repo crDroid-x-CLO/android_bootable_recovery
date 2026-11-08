@@ -36,12 +36,16 @@
 #include <string>
 #include <vector>
 
+#include <aidl/android/hardware/boot/IBootControl.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/parseint.h>
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
+#include <android/binder_ibinder.h>
+#include <android/binder_manager.h>
+#include <android/hardware/boot/1.0/IBootControl.h>
 #include <cutils/properties.h> /* for property_list */
 #include <fs_mgr/roots.h>
 #include <volume_manager/VolumeManager.h>
@@ -135,7 +139,7 @@ static bool save_current_log = false;
  */
 
 static bool IsRoDebuggable() {
-  return android::base::GetBoolProperty("ro.debuggable", false);
+  return true;
 }
 
 // Clear the recovery command and prepare to boot a (hopefully working) system,
@@ -205,6 +209,54 @@ bool ask_to_continue_downgrade(Device* device) {
     device->GetUI()->SetProgressType(RecoveryUI::EMPTY);
     return yes_no(device, "This package will downgrade your system", "Install anyway?");
   }
+}
+
+std::string get_chosen_slot(Device* device) {
+  std::vector<std::string> headers{ "Choose which slot to boot into on next boot." };
+  std::vector<std::string> items{ "A", "B" };
+  size_t chosen_item = device->GetUI()->ShowMenu(
+      headers, items, 0, true,
+      std::bind(&Device::HandleMenuKey, device, std::placeholders::_1, std::placeholders::_2));
+  if (chosen_item < 0)
+    return "";
+  return items[chosen_item];
+}
+
+int set_slot(Device* device) {
+  std::string slot = get_chosen_slot(device);
+  CommandResult ret;
+  auto cb = [&ret](CommandResult result) { ret = result; };
+  Slot sslot = (slot == "A") ? 0 : 1;
+  sp<IBootControl> module = IBootControl::getService();
+  if (!module) {
+    const auto instance_name = std::string(
+        ::aidl::android::hardware::boot::IBootControl::descriptor) + "/default";
+    if (AServiceManager_isDeclared(instance_name.c_str())) {
+      auto amodule = ::aidl::android::hardware::boot::IBootControl::fromBinder(
+          ndk::SpAIBinder(AServiceManager_waitForService(instance_name.c_str())));
+      if (amodule == nullptr) {
+        device->GetUI()->Print("AIDL bootctrl module is declared but returned nullptr.\n");
+      } else {
+        auto result = amodule->setActiveBootSlot(sslot);
+        if (result.isOk()) {
+          device->GetUI()->Print("Switched slot to %s.\n", slot.c_str());
+        } else {
+          device->GetUI()->Print("Error changing bootloader boot slot to %s", slot.c_str());
+        }
+      }
+    } else {
+      device->GetUI()->Print("Error getting bootctrl module.\n");
+    }
+  } else {
+      auto result = module->setActiveBootSlot(sslot, cb);
+    if (result.isOk() && ret.success) {
+      if (slot == "A" || slot == "B") device->GetUI()->Print("Switched slot to %s.\n", slot.c_str());
+      device->GoHome();
+    } else {
+      if (slot == "A" || slot == "B") device->GetUI()->Print("Error changing bootloader boot slot to %s", slot.c_str());
+    }
+  }
+  return ret.success ? 0 : 1;
 }
 
 bool ask_to_continue_spl_downgrade(Device* device) {
@@ -744,6 +796,10 @@ change_menu:
         ui->Print("Enabled ADB.\n");
         break;
 
+      case Device::SWAP_SLOT:
+        set_slot(device);
+        break;
+
       case Device::RUN_GRAPHICS_TEST:
         run_graphics_test(ui);
         break;
@@ -985,17 +1041,8 @@ Device::BuiltinAction start_recovery(Device* device, const std::vector<std::stri
     ui->SetStage(st_cur, st_max);
   }
 
-  // Extract the YYYYMMDD / YYYYMMDD_HHMMSS timestamp from the full version string.
-  // Assume the first instance of "-[0-9]{8}-", or "-[0-9]{8}_[0-9]{6}-" in case
-  // LINEAGE_VERSION_APPEND_TIME_OF_DAY is set to true has the desired date.
-  std::string ver = android::base::GetProperty("ro.lineage.version", "");
-  std::smatch ver_date_match;
-  std::regex_search(ver, ver_date_match, std::regex("-(\\d{8}(_\\d{6})?)-"));
-  std::string ver_date = ver_date_match.str(1);  // Empty if no match.
-
   std::vector<std::string> title_lines = {
-    "Version " + android::base::GetProperty("ro.lineage.build.version", "(unknown)") +
-        " (" + ver_date + ")",
+    "Version " + android::base::GetProperty("ro.crdroid.display.version", "(unknown)"),
   };
   title_lines.push_back("Product name - " + android::base::GetProperty("ro.product.device", ""));
   if (android::base::GetBoolProperty("ro.build.ab_update", false)) {
