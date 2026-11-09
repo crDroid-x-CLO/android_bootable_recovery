@@ -144,6 +144,7 @@ TextMenu::TextMenu(bool wrappable, size_t max_length,
       max_display_items_(items.size()),
       max_item_length_(max_length),
       text_headers_(headers),
+      menu_start_(0),
       char_height_(char_height) {
 
   size_t items_count = items.size();
