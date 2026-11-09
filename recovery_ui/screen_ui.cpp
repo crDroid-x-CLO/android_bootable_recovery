@@ -931,12 +931,6 @@ void ScreenRecoveryUI::DrawScrollBar(int y, int height) const {
   DrawRoundedRect(x, y, width, height, width / 2, width / 2);
 }
 
-void ScreenRecoveryUI::DrawScrollBar(int y, int height) const {
-  int x = ScreenWidth() - margin_width_;
-  int width = 8;
-  gr_fill(x - width, y, x, y + height);
-}
-
 void ScreenRecoveryUI::DrawFill(int x, int y, int w, int h) const {
   gr_fill(x, y, w, h);
 }
